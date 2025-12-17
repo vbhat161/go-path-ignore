@@ -120,6 +120,10 @@ func (r result) String() string {
 }
 
 func (m *Matcher) Match2(ctx context.Context, path string) (match.MatchInfo, error) {
+	if ctx.Err() != nil {
+		return match.NoMatch, ctx.Err()
+	}
+
 	res := result{}
 	if m.parallel {
 		if path, err := m.concurrentMatch(ctx, path); err != nil {
@@ -130,12 +134,14 @@ func (m *Matcher) Match2(ctx context.Context, path string) (match.MatchInfo, err
 		}
 	} else {
 		for _, g := range m.globs {
-			if ctx.Err() != nil {
+			select {
+			case <-ctx.Done():
 				return res, ctx.Err()
-			}
-			if g.Match(path) {
-				res.src = path
-				return res, nil
+			default:
+				if g.Match(path) {
+					res.src = path
+					return res, nil
+				}
 			}
 		}
 		return res, nil
