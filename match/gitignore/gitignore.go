@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/VishwaBhat/go-path-ignore/match"
+	"github.com/vbhat161/go-path-ignore/match"
 	regexp "github.com/wasilibs/go-re2"
 )
 
@@ -43,12 +43,19 @@ type Matcher struct {
 type Options struct {
 	Patterns []string
 	FilePath string
-	Parallel bool
 }
 
 // NewMatcher returns a new matcher for given patterns or from a file path. At least one
 // of patterns or filePath has to be present.
 func NewMatcher(opts Options) (*Matcher, error) {
+	return newMatcher(opts, false /*parallel*/)
+}
+
+func NewParallelMatcher(opts Options) (*Matcher, error) {
+	return newMatcher(opts, true /*parallel*/)
+}
+
+func newMatcher(opts Options, parallel bool) (*Matcher, error) {
 	if len(opts.Patterns) == 0 && opts.FilePath == "" {
 		return nil, fmt.Errorf("atleast one gitignore source required: file or lines")
 	}
@@ -74,7 +81,7 @@ func NewMatcher(opts Options) (*Matcher, error) {
 		}
 
 		r := res.rule
-		if !opts.Parallel {
+		if !parallel {
 			if re, err := regexp.Compile(r.rePat); err != nil {
 				return nil, fmt.Errorf("compile pattern %s - %w", pattern, err)
 			} else {
@@ -89,7 +96,7 @@ func NewMatcher(opts Options) (*Matcher, error) {
 		}
 	}
 
-	if opts.Parallel {
+	if parallel {
 		patterns := make([]string, 0, len(matcher.posRules))
 		for _, p := range matcher.posRules {
 			patterns = append(patterns, p.rePat)
@@ -101,15 +108,18 @@ func NewMatcher(opts Options) (*Matcher, error) {
 			matcher.posSet = set
 		}
 
-		negPatterns := make([]string, 0, len(matcher.negRules))
-		for _, p := range matcher.negRules {
-			negPatterns = append(negPatterns, p.rePat)
+		if len(matcher.negRules) > 0 {
+			negPatterns := make([]string, 0, len(matcher.negRules))
+			for _, p := range matcher.negRules {
+				negPatterns = append(negPatterns, p.rePat)
+			}
+			if set, err := match.NewRE2Set(negPatterns); err != nil {
+				return nil, fmt.Errorf("parallel: negation re2 set - %w", err)
+			} else {
+				matcher.negSet = set
+			}
 		}
-		if set, err := match.NewRE2Set(negPatterns); err != nil {
-			return nil, fmt.Errorf("parallel: negation re2 set - %w", err)
-		} else {
-			matcher.negSet = set
-		}
+
 	}
 
 	return matcher, nil
@@ -140,6 +150,10 @@ func (r result) Src() string {
 
 func (r result) Type() match.Type {
 	return match.GitIgnore
+}
+
+func (r result) String() string {
+	return fmt.Sprintf("%s:%s", r.Type(), r.src)
 }
 
 func (gi *Matcher) Match2(ctx context.Context, path string) (match.MatchInfo, error) {

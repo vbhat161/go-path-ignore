@@ -1,17 +1,18 @@
 package gopathignore_test
 
 import (
+	"context"
 	"testing"
 
-	gopathignore "github.com/VishwaBhat/go-path-ignore"
-	"github.com/VishwaBhat/go-path-ignore/match/gitignore"
-	"github.com/VishwaBhat/go-path-ignore/match/glob"
-	"github.com/VishwaBhat/go-path-ignore/match/regex"
 	"github.com/stretchr/testify/require"
+	gopathignore "github.com/vbhat161/go-path-ignore"
+	"github.com/vbhat161/go-path-ignore/match/gitignore"
+	"github.com/vbhat161/go-path-ignore/match/glob"
+	"github.com/vbhat161/go-path-ignore/match/regex"
+	"go.uber.org/goleak"
 )
 
 func TestNewPathIgnore(t *testing.T) {
-
 	tests := []struct {
 		name    string
 		opts    gopathignore.Options
@@ -20,7 +21,7 @@ func TestNewPathIgnore(t *testing.T) {
 		{
 			name:    "empty options",
 			opts:    gopathignore.Options{},
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "regex patterns",
@@ -35,7 +36,7 @@ func TestNewPathIgnore(t *testing.T) {
 			name: "glob patterns",
 			opts: gopathignore.Options{
 				Glob: &glob.Options{
-					Paths: []string{"foo/*"},
+					Patterns: []string{"foo/*"},
 				},
 			},
 			wantErr: false,
@@ -62,7 +63,7 @@ func TestNewPathIgnore(t *testing.T) {
 			name: "invalid glob pattern",
 			opts: gopathignore.Options{
 				Glob: &glob.Options{
-					Paths: []string{"["}, // Invalid glob
+					Patterns: []string{"["}, // Invalid glob
 				},
 			},
 			wantErr: true,
@@ -79,15 +80,19 @@ func TestNewPathIgnore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := gopathignore.New(tt.opts)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewPathIgnore() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				require.Error(t, err)
 				return
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
 }
 
-func TestShouldIgnore(t *testing.T) {
+func TestMatch(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	tests := []struct {
 		name    string
 		opts    gopathignore.Options
@@ -119,7 +124,7 @@ func TestShouldIgnore(t *testing.T) {
 			name: "glob match",
 			opts: gopathignore.Options{
 				Glob: &glob.Options{
-					Paths: []string{"foo/*"},
+					Patterns: []string{"foo/*"},
 				},
 			},
 			path: "foo/bar",
@@ -129,7 +134,7 @@ func TestShouldIgnore(t *testing.T) {
 			name: "glob no match",
 			opts: gopathignore.Options{
 				Glob: &glob.Options{
-					Paths: []string{"foo/*"},
+					Patterns: []string{"foo/*"},
 				},
 			},
 			path: "bar/foo",
@@ -162,7 +167,7 @@ func TestShouldIgnore(t *testing.T) {
 					Patterns: []string{"^foo.*"},
 				},
 				Glob: &glob.Options{
-					Paths: []string{"bar/*"},
+					Patterns: []string{"bar/*"},
 				},
 			},
 			path: "foobar",
@@ -175,7 +180,7 @@ func TestShouldIgnore(t *testing.T) {
 					Patterns: []string{"^foo.*"},
 				},
 				Glob: &glob.Options{
-					Paths: []string{"bar/*"},
+					Patterns: []string{"bar/*"},
 				},
 			},
 			path: "bar/baz",
@@ -188,8 +193,36 @@ func TestShouldIgnore(t *testing.T) {
 					Patterns: []string{"^foo.*"},
 				},
 				Glob: &glob.Options{
-					Paths: []string{"bar/*"},
+					Patterns: []string{"bar/*"},
 				},
+			},
+			path: "baz/qux",
+			want: false,
+		},
+		{
+			name: "multiple matchers, glob matches - llel",
+			opts: gopathignore.Options{
+				Regex: &regex.Options{
+					Patterns: []string{"^foo.*"},
+				},
+				Glob: &glob.Options{
+					Patterns: []string{"bar/*"},
+				},
+				Parallel: true,
+			},
+			path: "bar/baz",
+			want: true,
+		},
+		{
+			name: "multiple matchers, no match - llel",
+			opts: gopathignore.Options{
+				Regex: &regex.Options{
+					Patterns: []string{"^foo.*"},
+				},
+				Glob: &glob.Options{
+					Patterns: []string{"bar/*"},
+				},
+				Parallel: true,
 			},
 			path: "baz/qux",
 			want: false,
@@ -208,7 +241,7 @@ func TestShouldIgnore(t *testing.T) {
 			name: "invalid glob pattern during creation",
 			opts: gopathignore.Options{
 				Glob: &glob.Options{
-					Paths: []string{"["},
+					Patterns: []string{"["},
 				},
 			},
 			path:    "foobar",
@@ -233,9 +266,115 @@ func TestShouldIgnore(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			got, err := pi.ShouldIgnore(tt.path)
+			got, err := pi.Match(context.Background(), tt.path)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func Benchmark(b *testing.B) {
+	bench := func(parallel bool) func(*testing.B) {
+		return func(bench *testing.B) {
+			opts := gopathignore.Options{
+				GitIgnore: &gitignore.Options{
+					Patterns: []string{
+						"foo/",
+						"/dir/test.*",
+						"*.go",
+						"!important.txt",
+						"*.exe",
+						"*.exe~",
+						"*.dll",
+						"*.so",
+						"*.dylib",
+						"*.test",
+						"*.out",
+						"coverage.*",
+						"*.coverprofile",
+						"profile.cov",
+						"go.work",
+						".env",
+						".idea/",
+						".vscode/",
+					},
+				},
+				Regex: &regex.Options{
+					Patterns: []string{
+						`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`,
+						`^(?:https?://)?(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?$`,
+						`^(?:\+?1)?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$`,
+						`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`,
+						`^[A-Z]{2}[0-9]{6}[A-Z0-9]{3}$`,
+						`^#(?:[0-9a-fA-F]{3}){1,2}$`,
+						`^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})$`,
+						`^[A-Z]{1,2}[0-9]{1,4}[A-Z]{2}$`,
+						`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9]+)?$`,
+						`^[A-Za-z0-9._%+-]+(?:\+[A-Za-z0-9.-]*)?@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$`,
+					},
+				},
+				Glob: &glob.Options{
+					Patterns: []string{
+						"*.go",
+						"src/**/test_*.py",
+						"**/*.json",
+						"docs/**/*.md",
+						"*.{txt,log,err}",
+						"build/**/output_*",
+						"config/**.yaml",
+						".env*",
+						"node_modules/**/package.json",
+						"**/*_test.go",
+						"src/*/main.py",
+						"*.min.js",
+					},
+				},
+				Parallel: parallel,
+			}
+			pi, err := gopathignore.New(opts)
+			require.NoError(bench, err)
+			paths := []string{
+				"build/release/output_binary",
+				"config/app.yaml",
+				"node_modules/express/package.json",
+				"test.exe",
+				"/envs/.env",
+				"profs/output.out",
+				"CA123456ABC",
+				"#FF5733",
+				"4532123456789012",
+				"M1 1AA",
+				"1.2.3-beta",
+				"user+filter@gmail.com",
+				"invalid.email@",
+				"not a url at all",
+				"555-12345",
+				"2024/12/25",
+				"docs/api/reference.md",
+				"docs/guides/setup.md",
+				".env",
+				".env.local",
+				"build/dist/output_app",
+				"build/release/output_binary",
+				"config/app.yaml",
+				"node_modules/express/package.json",
+				"services_test.go",
+				"utils_test.go",
+				"src/auth/main.py",
+				"app.min.js",
+				"vendor.min.js",
+				"helpers.go",
+			}
+
+			bench.ResetTimer()
+			for bench.Loop() {
+				for _, p := range paths {
+					pi.Match2(context.Background(), p)
+				}
+			}
+		}
+	}
+
+	b.Run("sequential", bench(false /*parallel*/))
+	b.Run("parallel", bench(true /*parallel*/))
 }

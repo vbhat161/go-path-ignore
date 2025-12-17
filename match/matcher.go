@@ -2,7 +2,22 @@ package match
 
 import "context"
 
+var NoMatch = noMatch{}
+
 type Type int
+
+func (t Type) String() string {
+	switch t {
+	case GitIgnore:
+		return "gitignore"
+	case Glob:
+		return "glob"
+	case Regex:
+		return "regex"
+	default:
+		return "unknown"
+	}
+}
 
 const (
 	Unknown Type = iota
@@ -15,6 +30,7 @@ type MatchInfo interface {
 	Ok() bool
 	Src() string
 	Type() Type
+	String() string
 }
 
 type PathMatcher interface {
@@ -23,16 +39,20 @@ type PathMatcher interface {
 	Match2(ctx context.Context, path string) (MatchInfo, error)
 }
 
-type dummyMatch struct{}
+type noMatch struct{}
 
-func (dummyMatch) Ok() bool {
+func (noMatch) Ok() bool {
 	return false
 }
-func (dummyMatch) Src() string {
+
+func (noMatch) Src() string {
 	return ""
 }
-func (dummyMatch) Type() Type {
+
+func (noMatch) Type() Type {
 	return Unknown
 }
 
-var NoMatch = dummyMatch{}
+func (noMatch) String() string {
+	return ""
+}

@@ -1294,7 +1294,7 @@ func BenchmarkGitIgnoreMatches(b *testing.B) {
 	})
 
 	b.Run("llel:matches", func(bb *testing.B) {
-		m, e := NewMatcher(Options{Patterns: patterns, Parallel: true})
+		m, e := NewParallelMatcher(Options{Patterns: patterns})
 		require.NoError(bb, e)
 		bb.ResetTimer()
 		for bb.Loop() {
@@ -1305,7 +1305,7 @@ func BenchmarkGitIgnoreMatches(b *testing.B) {
 	})
 
 	b.Run("llel:non-matches", func(bb *testing.B) {
-		m, e := NewMatcher(Options{Patterns: patterns, Parallel: true})
+		m, e := NewParallelMatcher(Options{Patterns: patterns})
 		require.NoError(bb, e)
 		bb.ResetTimer()
 		for bb.Loop() {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/VishwaBhat/go-path-ignore/match"
+	"github.com/vbhat161/go-path-ignore/match"
 	regexp "github.com/wasilibs/go-re2"
 )
 
@@ -16,7 +16,6 @@ type Matcher struct {
 
 type Options struct {
 	Patterns []string
-	Parallel bool
 	Literals bool
 }
 
@@ -32,14 +31,6 @@ func NewMatcher(opts Options) (*Matcher, error) {
 		opts.Patterns = []string{literalRegex}
 	}
 
-	if opts.Parallel {
-		set, e := match.NewRE2Set(opts.Patterns)
-		if e != nil {
-			return nil, fmt.Errorf("patterns compilation - %w", e)
-		}
-		return &Matcher{set: set}, nil
-	}
-
 	regexps := make([]*regexp.Regexp, 0, len(opts.Patterns))
 	for _, p := range opts.Patterns {
 		if re, e := regexp.Compile(p); e != nil {
@@ -49,6 +40,25 @@ func NewMatcher(opts Options) (*Matcher, error) {
 		}
 	}
 	return &Matcher{regexps: regexps}, nil
+}
+
+func NewParallelMatcher(opts Options) (*Matcher, error) {
+	if len(opts.Patterns) == 0 {
+		return nil, fmt.Errorf("atleast one pattern required for regex matcher")
+	}
+
+	var literalRegex string
+	if opts.Literals {
+		quoted := quotePatterns(opts.Patterns)
+		literalRegex = strings.Join(quoted, "|")
+		opts.Patterns = []string{literalRegex}
+	}
+
+	set, e := match.NewRE2Set(opts.Patterns)
+	if e != nil {
+		return nil, fmt.Errorf("patterns compilation - %w", e)
+	}
+	return &Matcher{set: set}, nil
 }
 
 func (m *Matcher) Type() match.Type {
@@ -76,6 +86,10 @@ func (r result) Src() string {
 
 func (r result) Type() match.Type {
 	return match.Regex
+}
+
+func (r result) String() string {
+	return fmt.Sprintf("%s:%s", r.Type(), r.src)
 }
 
 // Matches takes a path and returns whether it is ignored according to the list of

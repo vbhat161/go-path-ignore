@@ -1,4 +1,4 @@
-module github.com/VishwaBhat/go-path-ignore
+module github.com/vbhat161/go-path-ignore
 
 go 1.25.4
 

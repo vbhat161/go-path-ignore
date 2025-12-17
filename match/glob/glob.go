@@ -2,10 +2,11 @@ package glob
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
-	"github.com/VishwaBhat/go-path-ignore/match"
 	"github.com/gobwas/glob"
+	"github.com/vbhat161/go-path-ignore/match"
 )
 
 type CompileError struct {
@@ -32,15 +33,14 @@ type Matcher struct {
 }
 
 type Options struct {
-	Paths    []string
-	RawPaths []string
-	Parallel bool
+	Patterns    []string
+	RawPatterns []string
 }
 
 func NewMatcher(opts Options) (*Matcher, []error) {
-	globs := make([]glob.Glob, 0, len(opts.Paths))
+	globs := make([]glob.Glob, 0, len(opts.Patterns))
 	var errs []error
-	for _, p := range opts.Paths {
+	for _, p := range opts.Patterns {
 		g, err := glob.Compile(p)
 		if err != nil {
 			errs = append(errs, newCompileError(p, err))
@@ -49,7 +49,7 @@ func NewMatcher(opts Options) (*Matcher, []error) {
 		globs = append(globs, g)
 	}
 
-	for _, p := range opts.RawPaths {
+	for _, p := range opts.RawPatterns {
 		escaped := glob.QuoteMeta(p)
 		g, err := glob.Compile(escaped)
 		if err != nil {
@@ -59,19 +59,27 @@ func NewMatcher(opts Options) (*Matcher, []error) {
 		globs = append(globs, g)
 	}
 
-	return &Matcher{globs: globs, parallel: opts.Parallel}, errs
+	return &Matcher{globs: globs, parallel: false}, errs
 }
 
 func NewStrictMatcher(opts Options) (*Matcher, error) {
-	globs := make([]glob.Glob, 0, len(opts.Paths))
-	for _, p := range opts.Paths {
+	return newStrictMatcher(opts, false /*parallel*/)
+}
+
+func NewStrictParallelMatcher(opts Options) (*Matcher, error) {
+	return newStrictMatcher(opts, true /*parallel*/)
+}
+
+func newStrictMatcher(opts Options, llel bool) (*Matcher, error) {
+	globs := make([]glob.Glob, 0, len(opts.Patterns))
+	for _, p := range opts.Patterns {
 		g, err := glob.Compile(p)
 		if err != nil {
 			return nil, newCompileError(p, err)
 		}
 		globs = append(globs, g)
 	}
-	for _, p := range opts.RawPaths {
+	for _, p := range opts.RawPatterns {
 		escaped := glob.QuoteMeta(p)
 		g, err := glob.Compile(escaped)
 		if err != nil {
@@ -79,7 +87,7 @@ func NewStrictMatcher(opts Options) (*Matcher, error) {
 		}
 		globs = append(globs, g)
 	}
-	return &Matcher{globs: globs, parallel: opts.Parallel}, nil
+	return &Matcher{globs: globs, parallel: llel}, nil
 }
 
 func (m *Matcher) Type() match.Type {
@@ -107,6 +115,10 @@ func (r result) Type() match.Type {
 	return match.Glob
 }
 
+func (r result) String() string {
+	return fmt.Sprintf("%s:%s", r.Type(), r.src)
+}
+
 func (m *Matcher) Match2(ctx context.Context, path string) (match.MatchInfo, error) {
 	res := result{}
 	if m.parallel {
@@ -132,7 +144,6 @@ func (m *Matcher) Match2(ctx context.Context, path string) (match.MatchInfo, err
 
 func (m *Matcher) concurrentMatch(ctx context.Context, path string) (string, error) {
 	foundSrc := make(chan string, 1)
-	defer close(foundSrc)
 
 	matchCtx, stopMatch := context.WithCancel(ctx)
 	defer stopMatch()
@@ -144,20 +155,24 @@ func (m *Matcher) concurrentMatch(ctx context.Context, path string) (string, err
 				return
 			}
 			if g.Match(path) {
-				foundSrc <- path
-				stopMatch()
+				select {
+				case <-matchCtx.Done():
+				case foundSrc <- path:
+					stopMatch()
+				}
 			}
 		})
 	}
 
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(foundSrc)
+	}()
 
 	select {
 	case p := <-foundSrc:
 		return p, nil
 	case <-matchCtx.Done():
-		return "", matchCtx.Err()
-	default:
 		return "", nil
 	}
 }

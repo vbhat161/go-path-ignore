@@ -11,11 +11,11 @@ import (
 
 func TestNewMatcher(t *testing.T) {
 	m, errors := NewMatcher(Options{
-		Paths: []string{
+		Patterns: []string{
 			"node_modules/**/*.js",
 			"*.css",
 		},
-		RawPaths: []string{
+		RawPatterns: []string{
 			"*.log",
 		},
 	})
@@ -28,12 +28,12 @@ func TestNewMatcher(t *testing.T) {
 func TestNewMatcher_Invalid(t *testing.T) {
 	invalidPath := "*[a-"
 	m, errors := NewMatcher(Options{
-		Paths: []string{
+		Patterns: []string{
 			"node_modules/**/*.js",
 			"*.css",
 			invalidPath, // invalid
 		},
-		RawPaths: []string{
+		RawPatterns: []string{
 			"*.log",
 		},
 	})
@@ -47,11 +47,11 @@ func TestNewMatcher_Invalid(t *testing.T) {
 
 func TestNewStrictMatcher(t *testing.T) {
 	m, errors := NewStrictMatcher(Options{
-		Paths: []string{
+		Patterns: []string{
 			"node_modules/**/*.js",
 			"*.css",
 		},
-		RawPaths: []string{
+		RawPatterns: []string{
 			"*.log",
 		},
 	})
@@ -64,12 +64,12 @@ func TestNewStrictMatcher(t *testing.T) {
 func TestStrictNewMatcher_Invalid(t *testing.T) {
 	invalidPath := "*[a-"
 	m, e := NewStrictMatcher(Options{
-		Paths: []string{
+		Patterns: []string{
 			"node_modules/**/*.js",
 			"*.css",
 			invalidPath, // invalid
 		},
-		RawPaths: []string{
+		RawPatterns: []string{
 			"*.log",
 		},
 	})
@@ -86,121 +86,124 @@ func TestGlob(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
+	defer goleak.VerifyNone(t) // Ensure no goroutines are leaked
+
 	testCases := []struct {
 		name        string
 		options     Options
-		path        string
+		input       string
+		parallel    bool
 		expected    bool
 		expectedErr error
 	}{
 		{
 			name: "single glob match",
 			options: Options{
-				Paths: []string{"*.go"},
+				Patterns: []string{"*.go"},
 			},
-			path:     "main.go",
+			input:    "main.go",
 			expected: true,
 		},
 		{
 			name: "single glob no match",
 			options: Options{
-				Paths: []string{"*.go"},
+				Patterns: []string{"*.go"},
 			},
-			path:     "main.txt",
+			input:    "main.txt",
 			expected: false,
 		},
 		{
 			name: "multiple globs match first",
 			options: Options{
-				Paths: []string{"*.txt", "*.go"},
+				Patterns: []string{"*.txt", "*.go"},
 			},
-			path:     "file.txt",
+			input:    "file.txt",
 			expected: true,
 		},
 		{
 			name: "multiple globs match second",
 			options: Options{
-				Paths: []string{"*.txt", "*.go"},
+				Patterns: []string{"*.txt", "*.go"},
 			},
-			path:     "file.go",
+			input:    "file.go",
 			expected: true,
 		},
 		{
 			name: "multiple globs no match",
 			options: Options{
-				Paths: []string{"*.txt", "*.go"},
+				Patterns: []string{"*.txt", "*.go"},
 			},
-			path:     "file.md",
+			input:    "file.md",
 			expected: false,
 		},
 		{
 			name: "raw path match",
 			options: Options{
-				RawPaths: []string{"foo/bar.txt"},
+				RawPatterns: []string{"foo/bar.txt"},
 			},
-			path:     "foo/bar.txt",
+			input:    "foo/bar.txt",
 			expected: true,
 		},
 		{
 			name: "raw path no match",
 			options: Options{
-				RawPaths: []string{"foo/bar.txt"},
+				RawPatterns: []string{"foo/bar.txt"},
 			},
-			path:     "foo/baz.txt",
+			input:    "foo/baz.txt",
 			expected: false,
 		},
 		{
 			name: "glob and raw path match glob",
 			options: Options{
-				Paths:    []string{"*.log"},
-				RawPaths: []string{"foo/bar.txt"},
+				Patterns:    []string{"*.log"},
+				RawPatterns: []string{"foo/bar.txt"},
 			},
-			path:     "debug.log",
+			input:    "debug.log",
 			expected: true,
 		},
 		{
 			name: "glob and raw path match raw",
 			options: Options{
-				Paths:    []string{"*.log"},
-				RawPaths: []string{"foo/bar.txt"},
+				Patterns:    []string{"*.log"},
+				RawPatterns: []string{"foo/bar.txt"},
 			},
-			path:     "foo/bar.txt",
+			input:    "foo/bar.txt",
 			expected: true,
 		},
 		{
 			name: "parallel matching match",
 			options: Options{
-				Paths:    []string{"*.txt", "*.go", "*.md"},
-				Parallel: true,
+				Patterns: []string{"*.txt", "*.go", "*.md"},
 			},
-			path:     "document.md",
+			parallel: true,
+			input:    "document.md",
 			expected: true,
 		},
 		{
 			name: "parallel matching no match",
 			options: Options{
-				Paths:    []string{"*.txt", "*.go", "*.md"},
-				Parallel: true,
+				Patterns: []string{"*.txt", "*.go", "*.md"},
 			},
-			path:     "image.png",
+			parallel: true,
+			input:    "image.png",
 			expected: false,
 		},
 		{
 			name: "context cancelled before match",
 			options: Options{
-				Paths:    []string{"*.txt", "*.go", "*.md"},
-				Parallel: true,
+				Patterns: []string{"*.txt", "*.go", "*.md"},
 			},
-			path:        "document.md",
+			parallel:    true,
+			input:       "document.md",
 			expected:    false,
 			expectedErr: context.Canceled,
 		},
 		{
 			name: "context cancelled during sequential match",
 			options: Options{
-				Paths: []string{"*.txt", "*.go", "*.md"},
+				Patterns: []string{"*.txt", "*.go", "*.md"},
 			},
-			path:        "document.md",
+			input:       "document.md",
 			expected:    false,
 			expectedErr: context.Canceled,
 		},
@@ -208,11 +211,18 @@ func TestMatch(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.options.Parallel {
-				defer goleak.VerifyNone(t) // Ensure no goroutines are leaked
+			var m *Matcher
+
+			if tc.parallel {
+				matcher, err := NewStrictParallelMatcher(tc.options)
+				require.NoError(t, err)
+				m = matcher
+			} else {
+				matcher, err := NewStrictMatcher(tc.options)
+				require.NoError(t, err)
+				m = matcher
 			}
-			m, errors := NewMatcher(tc.options)
-			require.Empty(t, errors)
+
 			require.NotNil(t, m)
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -222,7 +232,7 @@ func TestMatch(t *testing.T) {
 				defer cancel()
 			}
 
-			matched, err := m.Match(ctx, tc.path)
+			matched, err := m.Match(ctx, tc.input)
 
 			if tc.expectedErr != nil {
 				require.ErrorIs(t, err, tc.expectedErr)
